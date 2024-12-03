@@ -1,5 +1,7 @@
 import SQLite from 'react-native-sqlite-storage';
 
+SQLite.enablePromise(true);
+
 const db = SQLite.openDatabase(
   {
     name: 'gallery.db',
@@ -9,60 +11,98 @@ const db = SQLite.openDatabase(
     console.log('Database opened successfully');
   },
   (error) => {
-    console.log('Error opening database: ', error);
+    console.error('Error opening database:', error);
   }
 );
 
+// Initialize the database and create the table
 export const init = () => {
-  const promise = new Promise((resolve, reject) => {
-    db.transaction((tx) => {
-      tx.executeSql(
-        'CREATE TABLE IF NOT EXISTS photos (id INTEGER PRIMARY KEY NOT NULL, uri TEXT NOT NULL, date TEXT NOT NULL, time TEXT NOT NULL, latitude REAL, longitude REAL);',
-        [],
-        () => {
-          resolve();
-        },
-        (_, err) => {
-          reject(err);
-        }
-      );
-    });
+  return new Promise((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
+          `CREATE TABLE IF NOT EXISTS photos (
+            id INTEGER PRIMARY KEY NOT NULL,
+            uri TEXT NOT NULL,
+            date TEXT NOT NULL,
+            time TEXT NOT NULL,
+            latitude REAL,
+            longitude REAL
+          );`,
+          [],
+          () => {
+            console.log('Table created successfully');
+          },
+          (_, error) => {
+            console.error('Error creating table:', error);
+            reject(error);
+          }
+        );
+      },
+      (error) => {
+        console.error('Transaction error during init:', error);
+        reject(error);
+      },
+      () => {
+        resolve();
+      }
+    );
   });
-  return promise;
 };
 
-export const insertPhoto = (uri, date, time, latitude, longitude) => {
-  const promise = new Promise((resolve, reject) => {
-    db.transaction((tx) => {
-      tx.executeSql(
-        'INSERT INTO photos (uri, date, time, latitude, longitude) VALUES (?, ?, ?, ?, ?);',
-        [uri, date, time, latitude, longitude],
-        (_, result) => {
-          resolve(result);
-        },
-        (_, err) => {
-          reject(err);
-        }
-      );
-    });
-  });
-  return promise;
-};
-
+// Fetch photos from the database
 export const fetchPhotos = () => {
-  const promise = new Promise((resolve, reject) => {
-    db.transaction((tx) => {
-      tx.executeSql(
-        'SELECT * FROM photos;',
-        [],
-        (_, result) => {
-          resolve(result);
-        },
-        (_, err) => {
-          reject(err);
-        }
-      );
-    });
+  return new Promise((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
+          'SELECT * FROM photos;',
+          [],
+          (_, result) => {
+            if (!result || !result.rows) {
+              console.error('No rows returned from fetchPhotos');
+              reject(new Error('No rows returned'));
+            } else {
+              resolve(result);
+            }
+          },
+          (_, error) => {
+            console.error('Error executing fetchPhotos:', error);
+            reject(error);
+          }
+        );
+      },
+      (error) => {
+        console.error('Transaction error in fetchPhotos:', error);
+        reject(error);
+      }
+    );
   });
-  return promise;
 };
+
+// Insert a new photo
+export const insertPhoto = (uri, date, time, latitude, longitude) => {
+  return new Promise((resolve, reject) => {
+    db.transaction(
+      (tx) => {
+        tx.executeSql(
+          'INSERT INTO photos (uri, date, time, latitude, longitude) VALUES (?, ?, ?, ?, ?);',
+          [uri, date, time, latitude, longitude],
+          (_, result) => {
+            resolve(result);
+          },
+          (_, error) => {
+            console.error('Error inserting photo:', error);
+            reject(error);
+          }
+        );
+      },
+      (error) => {
+        console.error('Transaction error during insertPhoto:', error);
+        reject(error);
+      }
+    );
+  });
+};
+
+
