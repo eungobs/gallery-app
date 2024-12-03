@@ -1,5 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, FlatList, Image, Platform, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  TextInput,
+  FlatList,
+  Image,
+  Platform,
+  Alert,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
@@ -11,39 +21,45 @@ export default function App() {
   const [galleryImages, setGalleryImages] = useState([]);
 
   useEffect(() => {
-    const initializeApp = async () => {
-      try {
-        await init();
-        const result = await fetchPhotos();
-        const photos = [];
-        for (let i = 0; i < result.rows.length; i++) {
-          photos.push(result.rows.item(i));
-        }
-        setGalleryImages(photos);
-      } catch (error) {
-        console.error('Error initializing database or fetching photos:', error);
-      }
+    // Initialize the database
+    init()
+      .then(() => {
+        fetchPhotos()
+          .then((result) => {
+            const photos = [];
+            for (let i = 0; i < result.rows.length; i++) {
+              photos.push(result.rows.item(i));
+            }
+            setGalleryImages(photos);
+          })
+          .catch((err) => {
+            console.error('Error fetching photos:', err);
+          });
+      })
+      .catch((err) => {
+        console.error('Error initializing database:', err);
+      });
 
-      // Request permissions
+    // Request permissions
+    (async () => {
       if (Platform.OS !== 'web') {
-        const cameraPermission = await ImagePicker.requestCameraPermissionsAsync();
-        if (cameraPermission.status !== 'granted') {
-          Alert.alert('Permission Required', 'Camera permission is required to take photos.');
+        const cameraStatus = await ImagePicker.requestCameraPermissionsAsync();
+        if (cameraStatus.status !== 'granted') {
+          Alert.alert('Permission Denied', 'Camera access is required to take photos.');
         }
 
-        const locationPermission = await Location.requestForegroundPermissionsAsync();
-        if (locationPermission.status !== 'granted') {
-          Alert.alert('Permission Required', 'Location permission is required to tag photos with coordinates.');
+        const locationStatus = await Location.requestForegroundPermissionsAsync();
+        if (locationStatus.status !== 'granted') {
+          Alert.alert('Permission Denied', 'Location access is required for tagging photos.');
         }
       }
-    };
-
-    initializeApp();
+    })();
   }, []);
 
   const handleSearch = () => {
+    console.log('Searching for:', searchText);
     const filteredImages = galleryImages.filter((photo) =>
-      photo.uri.toLowerCase().includes(searchText.toLowerCase())
+      photo.date.includes(searchText) || photo.time.includes(searchText)
     );
     setGalleryImages(filteredImages);
   };
@@ -51,26 +67,31 @@ export default function App() {
   const handleCameraPress = async () => {
     try {
       const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.All,
+        mediaTypes: ImagePicker.MediaType.Images,
         allowsEditing: true,
         aspect: [4, 3],
         quality: 1,
       });
 
       if (!result.cancelled) {
+        setImage(result.uri);
         const location = await Location.getCurrentPositionAsync({});
         const date = new Date().toLocaleDateString();
         const time = new Date().toLocaleTimeString();
 
-        await insertPhoto(result.uri, date, time, location.coords.latitude, location.coords.longitude);
-
-        const updatedPhotos = await fetchPhotos();
-        const photos = [];
-        for (let i = 0; i < updatedPhotos.rows.length; i++) {
-          photos.push(updatedPhotos.rows.item(i));
-        }
-        setGalleryImages(photos);
-        setImage(result.uri);
+        insertPhoto(result.uri, date, time, location.coords.latitude, location.coords.longitude)
+          .then(() => {
+            fetchPhotos().then((result) => {
+              const photos = [];
+              for (let i = 0; i < result.rows.length; i++) {
+                photos.push(result.rows.item(i));
+              }
+              setGalleryImages(photos);
+            });
+          })
+          .catch((err) => {
+            console.error('Error inserting photo:', err);
+          });
       }
     } catch (error) {
       console.error('Error capturing photo:', error);
@@ -78,11 +99,11 @@ export default function App() {
   };
 
   const handleSettingsPress = () => {
-    Alert.alert('Settings', 'Settings feature is under development.');
+    console.log('Settings pressed');
   };
 
   const handleGalleryPress = () => {
-    Alert.alert('Gallery', 'Gallery feature is under development.');
+    console.log('Gallery pressed');
   };
 
   return (
@@ -90,23 +111,21 @@ export default function App() {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerText}>Gallery</Text>
-        <View style={styles.searchContainer}>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search"
-            value={searchText}
-            onChangeText={setSearchText}
-            onSubmitEditing={handleSearch}
-          />
-          <TouchableOpacity style={styles.searchIcon} onPress={handleSearch}>
-            <Ionicons name="search" size={24} color="black" />
-          </TouchableOpacity>
-        </View>
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search"
+          value={searchText}
+          onChangeText={setSearchText}
+          onSubmitEditing={handleSearch}
+        />
+        <TouchableOpacity style={styles.searchIcon} onPress={handleSearch}>
+          <Ionicons name="search" size={24} color="black" />
+        </TouchableOpacity>
       </View>
 
       {/* Gallery Content */}
       <View style={styles.galleryContent}>
-        {image && <Text style={styles.infoText}>Photo taken: {image}</Text>}
+        {image && <Text>Photo taken: {image}</Text>}
         <FlatList
           data={galleryImages}
           keyExtractor={(item) => item.id.toString()}
@@ -115,7 +134,7 @@ export default function App() {
               <Image source={{ uri: item.uri }} style={styles.galleryImage} />
               <Text>Date: {item.date}</Text>
               <Text>Time: {item.time}</Text>
-              <Text>Location: {item.latitude.toFixed(2)}, {item.longitude.toFixed(2)}</Text>
+              <Text>Location: {item.latitude}, {item.longitude}</Text>
             </View>
           )}
           numColumns={1}
@@ -157,18 +176,14 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: 'brown',
   },
-  searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
   searchInput: {
+    flex: 1,
     height: 40,
     borderColor: '#ccc',
     borderWidth: 1,
     borderRadius: 8,
     paddingHorizontal: 8,
     marginRight: 8,
-    flex: 1,
   },
   searchIcon: {
     padding: 8,
@@ -179,10 +194,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#fff',
   },
-  infoText: {
-    marginBottom: 10,
-    color: 'gray',
-  },
   galleryItem: {
     margin: 10,
     alignItems: 'center',
@@ -191,7 +202,6 @@ const styles = StyleSheet.create({
     width: 200,
     height: 200,
     marginBottom: 10,
-    borderRadius: 10,
   },
   footer: {
     flexDirection: 'row',
@@ -220,4 +230,5 @@ const styles = StyleSheet.create({
     backgroundColor: 'green',
   },
 });
+
 
