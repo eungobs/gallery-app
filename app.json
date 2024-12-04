@@ -25,7 +25,8 @@
       "favicon": "./assets/favicon.png"
     }
   },
-  "dependencies": {
-    "@react-native-community/cli": "latest"
+  "devDependencies": {
+    
   }
 }
+

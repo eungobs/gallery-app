@@ -1,46 +1,32 @@
 import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  TextInput,
-  FlatList,
-  Image,
-  Platform,
-  Alert,
-} from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, FlatList, Image, Platform, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import {
-  init,
-  insertPhoto,
-  fetchPhotos,
-  saveToLocalStorage,
-  getFromLocalStorage,
-  deleteFromLocalStorage,
-} from './database';
+
+// Import the functions from the database module
+import { initializeDatabase, addImage, getAllImages, deleteImage } from './database';
 
 export default function App() {
   const [searchText, setSearchText] = useState('');
   const [galleryImages, setGalleryImages] = useState([]);
   const [showGallery, setShowGallery] = useState(false);
+  const [newPhoto, setNewPhoto] = useState(null);
 
   useEffect(() => {
-    init()
+    // Initialize the database when the component mounts
+    initializeDatabase()
       .then(() => {
-        fetchPhotos()
-          .then((photos) => {
-            setGalleryImages(photos);
-            saveToLocalStorage(photos);
+        // Fetch all images from the database after initialization
+        getAllImages()
+          .then((images) => {
+            setGalleryImages(images);
           })
-          .catch((err) => console.error('Error fetching photos:', err));
+          .catch((err) => console.error('Error fetching images:', err));
       })
       .catch((err) => console.error('Error initializing database:', err));
 
-    getFromLocalStorage().then(setGalleryImages);
-
+    // Request camera and location permissions
     (async () => {
       if (Platform.OS !== 'web') {
         const cameraStatus = await ImagePicker.requestCameraPermissionsAsync();
@@ -70,7 +56,7 @@ export default function App() {
         const date = new Date().toLocaleDateString();
         const time = new Date().toLocaleTimeString();
 
-        const newPhoto = {
+        const photoData = {
           uri: result.uri,
           date,
           time,
@@ -78,31 +64,38 @@ export default function App() {
           longitude: location.coords.longitude,
         };
 
-        insertPhoto(
-          newPhoto.uri,
-          newPhoto.date,
-          newPhoto.time,
-          newPhoto.latitude,
-          newPhoto.longitude
-        )
-          .then(() => {
-            fetchPhotos()
-              .then((photos) => {
-                setGalleryImages(photos);
-                saveToLocalStorage(photos);
-              })
-              .catch((err) => console.error('Error fetching photos:', err));
-          })
-          .catch((err) => console.error('Error inserting photo:', err));
+        setNewPhoto(photoData);
       }
     } catch (error) {
       console.error('Error capturing photo:', error);
     }
   };
 
+  const handleSavePhoto = () => {
+    if (newPhoto) {
+      addImage(newPhoto.uri, newPhoto.date, newPhoto.latitude, newPhoto.longitude, newPhoto.time)
+        .then((id) => {
+          console.log('Photo added with ID:', id);
+          // Fetch updated images after saving the new photo
+          getAllImages()
+            .then((images) => {
+              setGalleryImages(images);
+              setNewPhoto(null);
+            })
+            .catch((err) => console.error('Error fetching images:', err));
+        })
+        .catch((err) => console.error('Error adding photo:', err));
+    } else {
+      Alert.alert('No photo to save', 'Please take a photo first.');
+    }
+  };
+
   const handleDelete = (id) => {
-    deleteFromLocalStorage(id);
-    setGalleryImages((prev) => prev.filter((photo) => photo.id !== id));
+    deleteImage(id)
+      .then(() => {
+        setGalleryImages((prev) => prev.filter((photo) => photo.id !== id));
+      })
+      .catch((err) => console.error('Error deleting photo:', err));
   };
 
   const toggleGalleryView = () => {
@@ -111,7 +104,6 @@ export default function App() {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerText}>Gallery</Text>
         <TextInput
@@ -125,16 +117,14 @@ export default function App() {
         </TouchableOpacity>
       </View>
 
-      {/* Gallery Content */}
       {showGallery ? (
         <FlatList
           data={galleryImages}
           keyExtractor={(item) => item.id.toString()}
           renderItem={({ item }) => (
             <View style={styles.galleryItem}>
-              <Image source={{ uri: item.uri }} style={styles.galleryImage} />
-              <Text>Date: {item.date}</Text>
-              <Text>Time: {item.time}</Text>
+              <Image source={{ uri: item.filePath }} style={styles.galleryImage} />
+              <Text>Date: {item.timestamp}</Text>
               <Text>Location: {item.latitude.toFixed(6)}, {item.longitude.toFixed(6)}</Text>
               <TouchableOpacity onPress={() => handleDelete(item.id)}>
                 <Text style={styles.deleteText}>Delete</Text>
@@ -148,8 +138,10 @@ export default function App() {
         </Text>
       )}
 
-      {/* Footer */}
       <View style={styles.footer}>
+        <TouchableOpacity style={styles.saveButton} onPress={handleSavePhoto}>
+          <Text style={styles.saveButtonText}>Save</Text>
+        </TouchableOpacity>
         <TouchableOpacity style={styles.cameraButton} onPress={handleCameraPress}>
           <Ionicons name="camera" size={24} color="white" />
         </TouchableOpacity>
@@ -176,19 +168,19 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     fontStyle: 'italic',
-    color: '#8B4513', // Brown color for Gallery text
+    color: '#8B4513',
   },
   searchInput: {
     flex: 1,
     marginLeft: 8,
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: '#CCCC99',
     borderRadius: 8,
     padding: 8,
   },
   folderButton: {
     marginLeft: 8,
-    backgroundColor: '#8B8000', // Dark yellow color for folder button
+    backgroundColor: '#8B8000',
     padding: 10,
     borderRadius: 8,
   },
@@ -215,10 +207,24 @@ const styles = StyleSheet.create({
     padding: 16,
     backgroundColor: '#000',
     alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center', // Center the camera button
   },
   cameraButton: {
     backgroundColor: '#007AFF',
     padding: 16,
     borderRadius: 8,
+  },
+  saveButton: {
+    backgroundColor: '#8B4513', // Dark brown color
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 4,
+    marginRight: 10,
+  },
+  saveButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 12, // Smaller font size
   },
 });
