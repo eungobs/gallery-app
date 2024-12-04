@@ -13,34 +13,34 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import { init, insertPhoto, fetchPhotos } from './database';
+import {
+  init,
+  insertPhoto,
+  fetchPhotos,
+  saveToLocalStorage,
+  getFromLocalStorage,
+  deleteFromLocalStorage,
+} from './database';
 
 export default function App() {
   const [searchText, setSearchText] = useState('');
-  const [image, setImage] = useState(null);
   const [galleryImages, setGalleryImages] = useState([]);
+  const [showGallery, setShowGallery] = useState(false);
 
   useEffect(() => {
-    // Initialize the database
     init()
       .then(() => {
         fetchPhotos()
-          .then((result) => {
-            const photos = [];
-            for (let i = 0; i < result.rows.length; i++) {
-              photos.push(result.rows.item(i));
-            }
+          .then((photos) => {
             setGalleryImages(photos);
+            saveToLocalStorage(photos);
           })
-          .catch((err) => {
-            console.error('Error fetching photos:', err);
-          });
+          .catch((err) => console.error('Error fetching photos:', err));
       })
-      .catch((err) => {
-        console.error('Error initializing database:', err);
-      });
+      .catch((err) => console.error('Error initializing database:', err));
 
-    // Request permissions
+    getFromLocalStorage().then(setGalleryImages);
+
     (async () => {
       if (Platform.OS !== 'web') {
         const cameraStatus = await ImagePicker.requestCameraPermissionsAsync();
@@ -56,54 +56,57 @@ export default function App() {
     })();
   }, []);
 
-  const handleSearch = () => {
-    console.log('Searching for:', searchText);
-    const filteredImages = galleryImages.filter((photo) =>
-      photo.date.includes(searchText) || photo.time.includes(searchText)
-    );
-    setGalleryImages(filteredImages);
-  };
-
   const handleCameraPress = async () => {
     try {
       const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaType.Images,
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [4, 3],
         quality: 1,
       });
 
       if (!result.cancelled) {
-        setImage(result.uri);
         const location = await Location.getCurrentPositionAsync({});
         const date = new Date().toLocaleDateString();
         const time = new Date().toLocaleTimeString();
 
-        insertPhoto(result.uri, date, time, location.coords.latitude, location.coords.longitude)
+        const newPhoto = {
+          uri: result.uri,
+          date,
+          time,
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        };
+
+        insertPhoto(
+          newPhoto.uri,
+          newPhoto.date,
+          newPhoto.time,
+          newPhoto.latitude,
+          newPhoto.longitude
+        )
           .then(() => {
-            fetchPhotos().then((result) => {
-              const photos = [];
-              for (let i = 0; i < result.rows.length; i++) {
-                photos.push(result.rows.item(i));
-              }
-              setGalleryImages(photos);
-            });
+            fetchPhotos()
+              .then((photos) => {
+                setGalleryImages(photos);
+                saveToLocalStorage(photos);
+              })
+              .catch((err) => console.error('Error fetching photos:', err));
           })
-          .catch((err) => {
-            console.error('Error inserting photo:', err);
-          });
+          .catch((err) => console.error('Error inserting photo:', err));
       }
     } catch (error) {
       console.error('Error capturing photo:', error);
     }
   };
 
-  const handleSettingsPress = () => {
-    console.log('Settings pressed');
+  const handleDelete = (id) => {
+    deleteFromLocalStorage(id);
+    setGalleryImages((prev) => prev.filter((photo) => photo.id !== id));
   };
 
-  const handleGalleryPress = () => {
-    console.log('Gallery pressed');
+  const toggleGalleryView = () => {
+    setShowGallery((prev) => !prev);
   };
 
   return (
@@ -116,16 +119,14 @@ export default function App() {
           placeholder="Search"
           value={searchText}
           onChangeText={setSearchText}
-          onSubmitEditing={handleSearch}
         />
-        <TouchableOpacity style={styles.searchIcon} onPress={handleSearch}>
-          <Ionicons name="search" size={24} color="black" />
+        <TouchableOpacity style={styles.folderButton} onPress={toggleGalleryView}>
+          <Ionicons name="folder" size={24} color="white" />
         </TouchableOpacity>
       </View>
 
       {/* Gallery Content */}
-      <View style={styles.galleryContent}>
-        {image && <Text>Photo taken: {image}</Text>}
+      {showGallery ? (
         <FlatList
           data={galleryImages}
           keyExtractor={(item) => item.id.toString()}
@@ -134,23 +135,23 @@ export default function App() {
               <Image source={{ uri: item.uri }} style={styles.galleryImage} />
               <Text>Date: {item.date}</Text>
               <Text>Time: {item.time}</Text>
-              <Text>Location: {item.latitude}, {item.longitude}</Text>
+              <Text>Location: {item.latitude.toFixed(6)}, {item.longitude.toFixed(6)}</Text>
+              <TouchableOpacity onPress={() => handleDelete(item.id)}>
+                <Text style={styles.deleteText}>Delete</Text>
+              </TouchableOpacity>
             </View>
           )}
-          numColumns={1}
         />
-      </View>
+      ) : (
+        <Text style={styles.instructionText}>
+          Tap the camera icon to take a photo or the folder icon to view saved images.
+        </Text>
+      )}
 
       {/* Footer */}
       <View style={styles.footer}>
-        <TouchableOpacity style={[styles.footerIcon, styles.cameraIcon]} onPress={handleCameraPress}>
+        <TouchableOpacity style={styles.cameraButton} onPress={handleCameraPress}>
           <Ionicons name="camera" size={24} color="white" />
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.footerIcon, styles.settingsIcon]} onPress={handleSettingsPress}>
-          <Ionicons name="settings" size={24} color="black" />
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.footerIcon, styles.galleryIcon]} onPress={handleGalleryPress}>
-          <Ionicons name="images" size={24} color="white" />
         </TouchableOpacity>
       </View>
     </View>
@@ -163,72 +164,61 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     padding: 16,
+    backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#ccc',
-    backgroundColor: '#fff',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   headerText: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: 'brown',
+    fontStyle: 'italic',
+    color: '#8B4513', // Brown color for Gallery text
   },
   searchInput: {
     flex: 1,
-    height: 40,
-    borderColor: '#ccc',
+    marginLeft: 8,
     borderWidth: 1,
+    borderColor: '#ccc',
     borderRadius: 8,
-    paddingHorizontal: 8,
-    marginRight: 8,
-  },
-  searchIcon: {
     padding: 8,
   },
-  galleryContent: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#fff',
+  folderButton: {
+    marginLeft: 8,
+    backgroundColor: '#8B8000', // Dark yellow color for folder button
+    padding: 10,
+    borderRadius: 8,
   },
   galleryItem: {
-    margin: 10,
-    alignItems: 'center',
+    padding: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#ccc',
   },
   galleryImage: {
-    width: 200,
+    width: '100%',
     height: 200,
-    marginBottom: 10,
+  },
+  deleteText: {
+    color: 'red',
+    marginTop: 8,
+  },
+  instructionText: {
+    textAlign: 'center',
+    margin: 16,
+    fontSize: 16,
+    color: '#666',
   },
   footer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'center',
     padding: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#ccc',
-    backgroundColor: '#fff',
-  },
-  footerIcon: {
-    padding: 8,
-    borderRadius: 50,
-    width: 50,
-    height: 50,
-    justifyContent: 'center',
+    backgroundColor: '#000',
     alignItems: 'center',
   },
-  cameraIcon: {
-    backgroundColor: 'brown',
-  },
-  settingsIcon: {
-    backgroundColor: 'grey',
-  },
-  galleryIcon: {
-    backgroundColor: 'green',
+  cameraButton: {
+    backgroundColor: '#007AFF',
+    padding: 16,
+    borderRadius: 8,
   },
 });
-
-
