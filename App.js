@@ -1,10 +1,21 @@
+// App.js
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, FlatList, Image, Platform, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  TextInput,
+  FlatList,
+  Image,
+  Platform,
+  Alert,
+  ActivityIndicator,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-
-// Import the functions from the database module
+import { StatusBar } from 'expo-status-bar';
 import { initializeDatabase, addImage, getAllImages, deleteImage } from './database';
 
 export default function App() {
@@ -12,136 +23,203 @@ export default function App() {
   const [galleryImages, setGalleryImages] = useState([]);
   const [showGallery, setShowGallery] = useState(false);
   const [newPhoto, setNewPhoto] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
-    // Initialize the database when the component mounts
-    initializeDatabase()
-      .then(() => {
-        // Fetch all images from the database after initialization
-        getAllImages()
-          .then((images) => {
-            setGalleryImages(images);
-          })
-          .catch((err) => console.error('Error fetching images:', err));
-      })
-      .catch((err) => console.error('Error initializing database:', err));
-
-    // Request camera and location permissions
-    (async () => {
-      if (Platform.OS !== 'web') {
-        const cameraStatus = await ImagePicker.requestCameraPermissionsAsync();
-        if (cameraStatus.status !== 'granted') {
-          Alert.alert('Permission Denied', 'Camera access is required to take photos.');
-        }
-
-        const locationStatus = await Location.requestForegroundPermissionsAsync();
-        if (locationStatus.status !== 'granted') {
-          Alert.alert('Permission Denied', 'Location access is required for tagging photos.');
-        }
-      }
-    })();
+    setupApp();
   }, []);
+
+  const setupApp = async () => {
+    try {
+      setLoading(true);
+      await initializeDatabase();
+      await requestPermissions();
+      await refreshGallery();
+    } catch (error) {
+      console.error('Error setting up app:', error);
+      Alert.alert('Error', 'Failed to initialize the app');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const requestPermissions = async () => {
+    if (Platform.OS !== 'web') {
+      const cameraStatus = await ImagePicker.requestCameraPermissionsAsync();
+      if (cameraStatus.status !== 'granted') {
+        Alert.alert('Permission Denied', 'Camera access is required to take photos.');
+      }
+
+      const locationStatus = await Location.requestForegroundPermissionsAsync();
+      if (locationStatus.status !== 'granted') {
+        Alert.alert('Permission Denied', 'Location access is required for tagging photos.');
+      }
+    }
+  };
+
+  const refreshGallery = async () => {
+    try {
+      setRefreshing(true);
+      const images = await getAllImages();
+      setGalleryImages(images);
+    } catch (error) {
+      console.error('Error refreshing gallery:', error);
+      Alert.alert('Error', 'Failed to load images');
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const handleCameraPress = async () => {
     try {
       const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ImagePicker.MediaTypeOptions.Images, // Fixed: Using MediaTypeOptions instead of MediaType
         allowsEditing: true,
         aspect: [4, 3],
         quality: 1,
       });
 
-      if (!result.cancelled) {
+      if (!result.canceled && result.assets && result.assets[0]) {
+        const photoUri = result.assets[0].uri;
         const location = await Location.getCurrentPositionAsync({});
-        const date = new Date().toLocaleDateString();
-        const time = new Date().toLocaleTimeString();
+        const timestamp = new Date().toISOString();
 
         const photoData = {
-          uri: result.uri,
-          date,
-          time,
+          uri: photoUri,
+          timestamp,
           latitude: location.coords.latitude,
           longitude: location.coords.longitude,
+          name: `Photo_${timestamp.substring(0, 10)}`,
         };
 
         setNewPhoto(photoData);
       }
     } catch (error) {
       console.error('Error capturing photo:', error);
+      Alert.alert('Error', 'Failed to capture photo');
     }
   };
 
-  const handleSavePhoto = () => {
-    if (newPhoto) {
-      addImage(newPhoto.uri, newPhoto.date, newPhoto.latitude, newPhoto.longitude, newPhoto.time)
-        .then((id) => {
-          console.log('Photo added with ID:', id);
-          // Fetch updated images after saving the new photo
-          getAllImages()
-            .then((images) => {
-              setGalleryImages(images);
-              setNewPhoto(null);
-            })
-            .catch((err) => console.error('Error fetching images:', err));
-        })
-        .catch((err) => console.error('Error adding photo:', err));
-    } else {
-      Alert.alert('No photo to save', 'Please take a photo first.');
+  const handleSavePhoto = async () => {
+    if (!newPhoto) {
+      Alert.alert('No photo', 'Please take a photo first');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await addImage(
+        newPhoto.uri,
+        newPhoto.timestamp,
+        newPhoto.latitude,
+        newPhoto.longitude,
+        newPhoto.name
+      );
+      
+      await refreshGallery();
+      setNewPhoto(null);
+      setShowGallery(true);
+      Alert.alert('Success', 'Photo saved successfully');
+    } catch (error) {
+      console.error('Error saving photo:', error);
+      Alert.alert('Error', 'Failed to save photo');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const handleDelete = (id) => {
-    deleteImage(id)
-      .then(() => {
-        setGalleryImages((prev) => prev.filter((photo) => photo.id !== id));
-      })
-      .catch((err) => console.error('Error deleting photo:', err));
+  const handleDelete = async (id) => {
+    try {
+      setLoading(true);
+      await deleteImage(id);
+      await refreshGallery();
+    } catch (error) {
+      console.error('Error deleting photo:', error);
+      Alert.alert('Error', 'Failed to delete photo');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const toggleGalleryView = () => {
-    setShowGallery((prev) => !prev);
-  };
+  const filteredImages = galleryImages.filter((image) =>
+    image.name.toLowerCase().includes(searchText.toLowerCase())
+  );
+
+  const renderGalleryItem = ({ item }) => (
+    <View style={styles.galleryItem}>
+      <Image source={{ uri: item.filePath }} style={styles.galleryImage} />
+      <View style={styles.imageDetails}>
+        <Text style={styles.imageName}>{item.name}</Text>
+        <Text style={styles.imageDate}>
+          Date: {new Date(item.timestamp).toLocaleDateString()}
+        </Text>
+        <Text style={styles.imageLocation}>
+          Location: {item.latitude.toFixed(6)}, {item.longitude.toFixed(6)}
+        </Text>
+        <TouchableOpacity
+          style={styles.deleteButton}
+          onPress={() => handleDelete(item.id)}
+        >
+          <Text style={styles.deleteText}>Delete</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#007AFF" />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
+      <StatusBar style="dark" />
       <View style={styles.header}>
         <Text style={styles.headerText}>Gallery</Text>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search"
-          value={searchText}
-          onChangeText={setSearchText}
-        />
-        <TouchableOpacity style={styles.folderButton} onPress={toggleGalleryView}>
-          <Ionicons name="folder" size={24} color="white" />
-        </TouchableOpacity>
+        <View style={styles.searchContainer}>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search photos..."
+            value={searchText}
+            onChangeText={setSearchText}
+          />
+          <TouchableOpacity style={styles.folderButton} onPress={() => setShowGallery(!showGallery)}>
+            <Ionicons name={showGallery ? "grid" : "folder"} size={24} color="white" />
+          </TouchableOpacity>
+        </View>
       </View>
 
       {showGallery ? (
         <FlatList
-          data={galleryImages}
+          data={filteredImages}
+          renderItem={renderGalleryItem}
           keyExtractor={(item) => item.id.toString()}
-          renderItem={({ item }) => (
-            <View style={styles.galleryItem}>
-              <Image source={{ uri: item.filePath }} style={styles.galleryImage} />
-              <Text>Date: {item.timestamp}</Text>
-              <Text>Location: {item.latitude.toFixed(6)}, {item.longitude.toFixed(6)}</Text>
-              <TouchableOpacity onPress={() => handleDelete(item.id)}>
-                <Text style={styles.deleteText}>Delete</Text>
-              </TouchableOpacity>
-            </View>
-          )}
+          contentContainerStyle={styles.galleryList}
+          onRefresh={refreshGallery}
+          refreshing={refreshing}
         />
       ) : (
-        <Text style={styles.instructionText}>
-          Tap the camera icon to take a photo or the folder icon to view saved images.
-        </Text>
+        <View style={styles.previewContainer}>
+          {newPhoto ? (
+            <Image source={{ uri: newPhoto.uri }} style={styles.previewImage} />
+          ) : (
+            <Text style={styles.instructionText}>
+              Tap the camera icon to take a photo or the folder icon to view saved images.
+            </Text>
+          )}
+        </View>
       )}
 
       <View style={styles.footer}>
-        <TouchableOpacity style={styles.saveButton} onPress={handleSavePhoto}>
-          <Text style={styles.saveButtonText}>Save</Text>
-        </TouchableOpacity>
+        {newPhoto && (
+          <TouchableOpacity style={styles.saveButton} onPress={handleSavePhoto}>
+            <Text style={styles.saveButtonText}>Save Photo</Text>
+          </TouchableOpacity>
+        )}
         <TouchableOpacity style={styles.cameraButton} onPress={handleCameraPress}>
           <Ionicons name="camera" size={24} color="white" />
         </TouchableOpacity>
@@ -155,76 +233,142 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+  },
   header: {
     padding: 16,
     backgroundColor: '#fff',
     borderBottomWidth: 1,
     borderBottomColor: '#ccc',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    paddingTop: Platform.OS === 'ios' ? 50 : 16,
   },
   headerText: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: 'bold',
-    fontStyle: 'italic',
-    color: '#8B4513',
+    color: '#333',
+    marginBottom: 12,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   searchInput: {
     flex: 1,
-    marginLeft: 8,
-    borderWidth: 1,
-    borderColor: '#CCCC99',
+    height: 40,
+    backgroundColor: '#f0f0f0',
     borderRadius: 8,
-    padding: 8,
+    paddingHorizontal: 12,
+    marginRight: 8,
   },
   folderButton: {
-    marginLeft: 8,
-    backgroundColor: '#8B8000',
-    padding: 10,
+    backgroundColor: '#007AFF',
+    padding: 8,
     borderRadius: 8,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  previewContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  previewImage: {
+    width: '100%',
+    height: 300,
+    borderRadius: 12,
+    marginBottom: 20,
+  },
+  instructionText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+  galleryList: {
+    padding: 8,
   },
   galleryItem: {
-    padding: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ccc',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginBottom: 12,
+    overflow: 'hidden',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   galleryImage: {
     width: '100%',
     height: 200,
+    backgroundColor: '#f0f0f0',
+  },
+  imageDetails: {
+    padding: 12,
+  },
+  imageName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 4,
+    color: '#333',
+  },
+  imageDate: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 2,
+  },
+  imageLocation: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 8,
+  },
+  deleteButton: {
+    backgroundColor: '#ff3b30',
+    padding: 8,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
   },
   deleteText: {
-    color: 'red',
-    marginTop: 8,
-  },
-  instructionText: {
-    textAlign: 'center',
-    margin: 16,
-    fontSize: 16,
-    color: '#666',
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
   },
   footer: {
-    padding: 16,
-    backgroundColor: '#000',
-    alignItems: 'center',
     flexDirection: 'row',
-    justifyContent: 'center', // Center the camera button
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#ccc',
   },
   cameraButton: {
     backgroundColor: '#007AFF',
     padding: 16,
-    borderRadius: 8,
+    borderRadius: 12,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   saveButton: {
-    backgroundColor: '#8B4513', // Dark brown color
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 4,
-    marginRight: 10,
+    backgroundColor: '#34c759',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    marginRight: 12,
   },
   saveButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 12, // Smaller font size
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
