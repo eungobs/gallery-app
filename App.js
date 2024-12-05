@@ -11,12 +11,18 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { StatusBar } from 'expo-status-bar';
-import { initializeDatabase, addImage, getAllImages, deleteImage } from './database';
+import {
+  initializeDatabase,
+  addImage,
+  getAllImages,
+  deleteImage,
+} from './database'; // Include your database functions here
 
 export default function App() {
   const [searchText, setSearchText] = useState('');
@@ -74,7 +80,7 @@ export default function App() {
   const handleCameraPress = async () => {
     try {
       const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images, // Fixed: Using MediaTypeOptions instead of MediaType
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [4, 3],
         quality: 1,
@@ -116,7 +122,6 @@ export default function App() {
         newPhoto.longitude,
         newPhoto.name
       );
-      
       await refreshGallery();
       setNewPhoto(null);
       setShowGallery(true);
@@ -142,6 +147,13 @@ export default function App() {
     }
   };
 
+  const openLocationInMap = (latitude, longitude) => {
+    const url = `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
+    Linking.openURL(url).catch((err) =>
+      Alert.alert('Error', 'Failed to open map: ' + err.message)
+    );
+  };
+
   const filteredImages = galleryImages.filter((image) =>
     image.name.toLowerCase().includes(searchText.toLowerCase())
   );
@@ -154,26 +166,23 @@ export default function App() {
         <Text style={styles.imageDate}>
           Date: {new Date(item.timestamp).toLocaleDateString()}
         </Text>
-        <Text style={styles.imageLocation}>
-          Location: {item.latitude.toFixed(6)}, {item.longitude.toFixed(6)}
-        </Text>
-        <TouchableOpacity
-          style={styles.deleteButton}
-          onPress={() => handleDelete(item.id)}
-        >
-          <Text style={styles.deleteText}>Delete</Text>
-        </TouchableOpacity>
+        <View style={styles.actionContainer}>
+          <TouchableOpacity
+            style={styles.locationButton}
+            onPress={() => openLocationInMap(item.latitude, item.longitude)}
+          >
+            <Ionicons name="location" size={20} color="white" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.deleteButton}
+            onPress={() => handleDelete(item.id)}
+          >
+            <Text style={styles.deleteText}>Delete</Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
-
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
-      </View>
-    );
-  }
 
   return (
     <View style={styles.container}>
@@ -188,7 +197,7 @@ export default function App() {
             onChangeText={setSearchText}
           />
           <TouchableOpacity style={styles.folderButton} onPress={() => setShowGallery(!showGallery)}>
-            <Ionicons name={showGallery ? "grid" : "folder"} size={24} color="white" />
+            <Ionicons name={showGallery ? 'grid' : 'folder'} size={24} color="white" />
           </TouchableOpacity>
         </View>
       </View>
@@ -227,7 +236,6 @@ export default function App() {
     </View>
   );
 }
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -273,6 +281,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  actionButtons: {
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  marginTop: 8,
+},
+locationButton: {
+  backgroundColor: '#007AFF',
+  padding: 8,
+  borderRadius: 6,
+  marginRight: 8,
+  justifyContent: 'center',
+  alignItems: 'center',
+},
+
   previewContainer: {
     flex: 1,
     justifyContent: 'center',
