@@ -8,6 +8,7 @@ import {
   TextInput,
   FlatList,
   Image,
+  Modal,
   Platform,
   Alert,
   ActivityIndicator,
@@ -22,7 +23,7 @@ import {
   addImage,
   getAllImages,
   deleteImage,
-} from './database'; // Include your database functions here
+} from './database'; // Your database functions
 
 export default function App() {
   const [searchText, setSearchText] = useState('');
@@ -31,6 +32,7 @@ export default function App() {
   const [newPhoto, setNewPhoto] = useState(null);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [zoomedImage, setZoomedImage] = useState(null);
 
   useEffect(() => {
     setupApp();
@@ -159,29 +161,31 @@ export default function App() {
   );
 
   const renderGalleryItem = ({ item }) => (
-    <View style={styles.galleryItem}>
-      <Image source={{ uri: item.filePath }} style={styles.galleryImage} />
-      <View style={styles.imageDetails}>
-        <Text style={styles.imageName}>{item.name}</Text>
-        <Text style={styles.imageDate}>
-          Date: {new Date(item.timestamp).toLocaleDateString()}
-        </Text>
-        <View style={styles.actionContainer}>
-          <TouchableOpacity
-            style={styles.locationButton}
-            onPress={() => openLocationInMap(item.latitude, item.longitude)}
-          >
-            <Ionicons name="location" size={20} color="white" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.deleteButton}
-            onPress={() => handleDelete(item.id)}
-          >
-            <Text style={styles.deleteText}>Delete</Text>
-          </TouchableOpacity>
+    <TouchableOpacity onPress={() => setZoomedImage(item.filePath)}>
+      <View style={styles.galleryItem}>
+        <Image source={{ uri: item.filePath }} style={styles.galleryImage} />
+        <View style={styles.imageDetails}>
+          <Text style={styles.imageName}>{item.name}</Text>
+          <Text style={styles.imageDate}>
+            Date: {new Date(item.timestamp).toLocaleDateString()}
+          </Text>
+          <View style={styles.actionContainer}>
+            <TouchableOpacity
+              style={styles.locationButton}
+              onPress={() => openLocationInMap(item.latitude, item.longitude)}
+            >
+              <Ionicons name="location" size={16} color="white" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.deleteButton}
+              onPress={() => handleDelete(item.id)}
+            >
+              <Text style={styles.deleteText}>Delete</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 
   return (
@@ -233,9 +237,21 @@ export default function App() {
           <Ionicons name="camera" size={24} color="white" />
         </TouchableOpacity>
       </View>
+
+      {zoomedImage && (
+        <Modal visible={true} transparent={true} animationType="fade">
+          <View style={styles.modalContainer}>
+            <Image source={{ uri: zoomedImage }} style={styles.zoomedImage} />
+            <TouchableOpacity style={styles.closeButton} onPress={() => setZoomedImage(null)}>
+              <Ionicons name="close" size={30} color="white" />
+            </TouchableOpacity>
+          </View>
+        </Modal>
+      )}
     </View>
   );
-}
+};
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
